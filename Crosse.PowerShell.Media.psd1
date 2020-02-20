@@ -12,7 +12,7 @@
 # RootModule = ''
 
 # Version number of this module.
-ModuleVersion = '1.0'
+ModuleVersion = '2.0'
 
 # ID used to uniquely identify this module
 GUID = 'dd34505a-5549-41dd-b039-269571a8d2bb'
@@ -24,13 +24,13 @@ Author = 'Seth Wright'
 CompanyName = 'crosse productions'
 
 # Copyright statement for this module
-Copyright = 'Copyright ? 2011 Seth Wright <seth@crosse.org>'
+Copyright = 'Copyright (c) 2011-2020 Seth Wright <seth@crosse.org>'
 
 # Description of the functionality provided by this module
 # Description = ''
 
 # Minimum version of the Windows PowerShell engine required by this module
-PowerShellVersion = '3.0'
+PowerShellVersion = '6.0'
 
 # Name of the Windows PowerShell host required by this module
 # PowerShellHostName = ''
@@ -96,4 +96,3 @@ FileList = 'Out-M4V.psm1',
 # DefaultCommandPrefix = ''
 
 }
-
