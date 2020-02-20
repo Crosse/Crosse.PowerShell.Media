@@ -138,23 +138,21 @@ function Out-M4V {
             $Force,
 
             [Parameter(Mandatory=$false)]
-            [string]
-            # The path to HandbrakeCLI.exe.  By default this is "C:\Program Files\Handbrake\HandbrakeCLI.exe".
-            $HandbrakeCLIPath = "C:\Program Files\Handbrake\HandbrakeCLI.exe",
-
-            [Parameter(Mandatory=$false)]
-            [string]
-            # The path to the MediaInfo.exe CLI program (NOT the GUI application, which unfortunately has the same name).  The default is to use the binaries in the same directory as this cmdlet's module manifest.
-            $MediaInfoCLIPath = (Join-Path $PSScriptRoot "MediaInfo.exe"),
-
-            [Parameter(Mandatory=$false)]
             [switch]
             # Shows what would happen if the cmdlet runs. The cmdlet is not run.
             $WhatIf
           )
 
     begin {
-        Resolve-Path $HandbrakeCLIPath -ErrorAction Stop | Out-Null
+        if ($IsWindows) {
+            $HandbrakeCLIPath = "HandbrakeCLI.exe"
+        } elseif ($IsMacOS) {
+            $HandbrakeCLIPath = "HandbrakeCLI"
+        } else {
+            Write-Error "I don't know where to find HandbrakeCLI!"
+        }
+
+        $HandbrakeCLIPath = (Get-Command $HandbrakeCLIPath -ErrorAction Stop).Source
         Write-Verbose "Found HandbrakeCLI: $HandbrakeCLIPath"
 
         Resolve-Path $MediaInfoCLIPath -ErrorAction Stop | Out-Null
