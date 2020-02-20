@@ -479,4 +479,164 @@ function New-AudioTrack {
     }
 }
 
+function Get-MediaInfo {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true,
+                   ValueFromPipeline=$true)]
+        [Alias("File")]
+        [object]
+        # The input file.
+        $InputFile
+    )
 
+    begin {
+        if ($IsWindows) {
+            $MediaInfoCLIPath = "MediaInfo.exe"
+        } elseif ($IsMacOS) {
+            $MediaInfoCLIPath = "mediainfo"
+        } else {
+            Write-Error "I don't know where to find MediaInfo!"
+        }
+
+        $MediaInfoCLIPath = (Get-Command $MediaInfoCLIPath -ErrorAction Stop).Source
+        Write-Verbose "Found MediaInfo: $MediaInfoCLIPath"
+    }
+
+    process {
+        if ($InputFile -isnot [System.IO.FileInfo]) {
+            $inter = Resolve-Path $InputFile
+            $InputFile = [System.IO.FileInfo]$inter.Path
+        }
+        Write-Verbose "Input File: $InputFile"
+
+        $command = "& '$MediaInfoCLIPath' --Output=JSON `"$($InputFile.FullName)`""
+        $info = Invoke-Expression "$command" | ConvertFrom-Json
+        return $info.media.track
+    }
+}
+
+function Get-M4VTrack {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true,
+                   ValueFromPipeline=$true)]
+        [Alias("File")]
+        [object]
+        # The source MKV file.
+        $InputFile,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateSet("Menu", "Video", "Audio", "Text", "All")]
+        [String]
+        $TrackType = "All"
+    )
+
+    if ($InputFile -isnot [System.IO.FileInfo]) {
+        $inter = Resolve-Path $InputFile
+        $InputFile = [System.IO.FileInfo]$inter.Path
+    }
+
+    $tracks = @(Get-MediaInfo -InputFile $InputFile)
+    if ($TrackType -ne "All") {
+        $tracks = $tracks | Where-Object { $_."@type" -eq $TrackType }
+    }
+
+    return $tracks
+}
+
+function Export-SRTSubtitle {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true,
+                   ValueFromPipeline=$true)]
+        [Alias("File")]
+        [object]
+        # The source MKV file from which to extract subtitles.
+        $InputFile,
+
+        [Parameter(Mandatory=$false,
+                   ParameterSetName="Batch")]
+        [System.IO.DirectoryInfo]
+        # The output path.  The resulting file name will the the same as the input file, with an extension that depends on the output format.
+        $OutputPath = (Get-Location).Path,
+
+        [Parameter(Mandatory=$false)]
+        [switch]
+        # Extract all subtitles. Normally only subtitle tracks marked as "default" and "forced" are extracted.
+        $All,
+
+        [Parameter(Mandatory=$false)]
+        [switch]
+        # Indicates whether to overwrite an output file that already exists.
+        $Force,
+
+        [Parameter(Mandatory=$false)]
+        [switch]
+        # Shows what would happen if the cmdlet runs. The cmdlet is not run.
+        $WhatIf
+    )
+
+    begin {
+        if ($IsWindows) {
+            $mkvextract = "mkvextract.exe"
+        } else {
+            $mkvextract = "mkvextract"
+        }
+
+        $mkvextract = (Get-Command $mkvextract -ErrorAction Stop).Source
+        Write-Verbose "Found mkvextract: $mkvextract"
+
+        $OutputPath = (Resolve-Path $OutputPath -ErrorAction Stop).Path
+        Write-Verbose "Output Path: $OutputPath"
+    }
+
+    process {
+        if ($InputFile -isnot [System.IO.FileInfo]) {
+            $inter = Resolve-Path $InputFile
+            $InputFile = [System.IO.FileInfo]$inter.Path
+        }
+
+        $tracks = Get-M4VTrack -InputFile $InputFile | ? { $_."@type" -ne "General" }
+        for ($i = 0; $i -lt $tracks.Count; $i++) {
+            $s = $tracks[$i]
+
+            if ($s.CodecID -notmatch '(S_TEXT/(UTF8|ASCII)|PGS)') {
+                Write-Information ("Skipping non-text track {0} ({1}, {2})" -f $i, $s."@type", $s.CodecID)
+                continue
+            }
+
+            if ($s.Forced -eq "No" -and $s.Default -eq "No" -and $All -eq $false) {
+                Write-Information ("Skipping non-default, non-forced subtitle track {0}" -f $i)
+                Write-Verbose $s
+                continue
+            }
+
+            if ($s.Forced -eq "Yes") {
+                $forced = ".forced"
+            }
+            if ($s.Format -eq "PGS") {
+                $ext = ".sup"
+            } else {
+                $ext = ".srt"
+            }
+            $append = ".{0}{1}{2}" -f $s.Language, $forced, $ext
+            $outFile = Join-Path $OutputPath $InputFile.Name.Replace($InputFile.Extension, $append)
+
+            if ((Test-Path $outFile) -eq $true -and
+                    $Force -eq $false -and
+                    $WhatIf -eq $false) {
+                Write-Error "Output file already exists! ($outFile)"
+                continue
+            }
+
+            Write-Verbose ("Writing subtitle track with ID {0} to {1}" -f $i, $outFile)
+            $command = "& '$mkvextract' `"$($InputFile.FullName)`" tracks `"{0}:{1}`"" -f $i, $outFile
+            if ($WhatIf -eq $false) {
+                Invoke-Expression "$command"
+            } else {
+                Write-Information "Would execute: $command"
+            }
+        }
+    }
+}
