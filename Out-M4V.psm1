@@ -44,8 +44,6 @@ function Out-M4V {
 
             [Parameter(Mandatory=$true,
                 ParameterSetName="Single")]
-            [Parameter(Mandatory=$true,
-                ParameterSetName="SingleChaptersDb")]
             [System.IO.FileInfo]
             # The output file.
             $OutputFile,
@@ -58,8 +56,6 @@ function Out-M4V {
 
             [Parameter(Mandatory=$false,
                 ParameterSetName="Batch")]
-            [Parameter(Mandatory=$false,
-                ParameterSetName="BatchChaptersDb")]
             [System.IO.DirectoryInfo]
             # The output path.  The resulting file name will the the same as the input file, with an extension that depends on the output format.
             $OutputPath = (Get-Location).Path,
@@ -71,10 +67,16 @@ function Out-M4V {
             $MaxVideoFormat,
 
             [Parameter(Mandatory=$false)]
+            [ValidateSet("x264", "x265", "vt_h264", "vt_h265")]
+            [string]
+            # Force a specific encoder.
+            $ForceEncoder,
+
+            [Parameter(Mandatory=$false)]
             [ValidateRange(1, 51)]
             [int]
-            # Set the video quality, from 1 to 51.  The default is 18.
-            $VideoQuality = 18,
+            # Set the video quality, from 1 to 51.  The default is 18 for x264 encoding and 21 for x265.
+            $VideoQuality,
 
             [Parameter(Mandatory=$false)]
             [switch]
@@ -101,28 +103,10 @@ function Out-M4V {
             # An array of audio tracks to ignore and not add to the output file.  The audio tracks are numbered starting from one and are in the same order as MediaInfo reports.
             $IgnoreAudioTracks,
 
-            [Parameter(Mandatory=$false,
-                ParameterSetName="ChaptersDb")]
-            [Parameter(Mandatory=$false,
-                ParameterSetName="SingleChaptersDb")]
-            [Parameter(Mandatory=$false,
-                ParameterSetName="BatchChaptersDb")]
-            [switch]
             # Indicates whether to attempt to look up chapter names on ChaptersDb.org.
+            [switch]
             $LookupChapterNames,
 
-            [Parameter(Mandatory=$true,
-                ParameterSetName="ChaptersDb")]
-            [Parameter(Mandatory=$true,
-                ParameterSetName="SingleChaptersDb")]
-            [Parameter(Mandatory=$true,
-                ParameterSetName="BatchChaptersDb")]
-            [ValidateNotNullOrEmpty()]
-            [string]
-            # Your API Key for the ChaptersDb.org website.
-            $ChaptersDbApiKey,
-
-            [Parameter(Mandatory=$false)]
             [switch]
             # Adds an extra pass that scans subtitles matching the language of the first audio or the language selected by the -NativeLanguage parameter. The one that's only used 10 percent of the time or less is selected. This should locate subtitles for short foreign language segments. The default is true.
             $SubtitleScan = $true,
@@ -155,9 +139,6 @@ function Out-M4V {
         $HandbrakeCLIPath = (Get-Command $HandbrakeCLIPath -ErrorAction Stop).Source
         Write-Verbose "Found HandbrakeCLI: $HandbrakeCLIPath"
 
-        Resolve-Path $MediaInfoCLIPath -ErrorAction Stop | Out-Null
-        Write-Verbose "Found MediaInfo: $MediaInfoCLIPath"
-
         $OutputPath = (Resolve-Path $OutputPath -ErrorAction Stop).Path
         Write-Verbose "Output Path: $OutputPath"
 
@@ -170,18 +151,12 @@ function Out-M4V {
         $handbrakeOptions = @(
                 # Set output format.
                 $format
-                # Use 64-bit mp4 files that can hold more than 4GB.
-                "--large-file"
-                # Set video library encoder
-                "--encoder x264"
                 # advanced encoder options in the same style as mencoder
                 "--encopts `"b-adapt=2`""
-                # Set video quality
-                "--quality $VideoQuality"
                 # Set video framerate
-                "--rate 29.97"
+                #"--rate 29.97"
                 # Select peak-limited frame rate control.
-                "--pfr"
+                #"--pfr"
                 # Set audio codec to use when it is not possible to copy an
                 # audio track without re-encoding.
                 "--audio-fallback ffac3"
@@ -248,10 +223,9 @@ function Out-M4V {
 
             Write-Verbose "Output File: $outFile"
 
-            $command = "& '$MediaInfoCLIPath' --Output=XML `"$($inputFile.FullName)`""
-            [xml]$info = Invoke-Expression "$command"
+            $info = Get-MediaInfo $InputFile
 
-            $audio = @($info.MediaInfo.File.Track | Where-Object { $_.type -match "Audio" })
+            $audio = @($info | Where-Object { $_."@type" -match "Audio" })
             if ($audio -eq $null) {
                 Write-Error "Error getting audio track information from source."
                 return
@@ -351,32 +325,58 @@ function Out-M4V {
 
             $audioOptions = "--audio `"$trackNumbers`" --aencoder `"$trackEncodings`" --mixdown `"$mixdown`" --aname `"$trackNames`""
 
-            if ([String]::IsNullOrEmpty($MaxVideoFormat)) {
-                $video = $info.MediaInfo.File.Track | Where-Object { $_.type -match "Video" }
-                if ($video -eq $null) {
-                    Write-Error "Error getting video track information from source."
-                    return
+            $generalInfo = $info | Where-Object { $_."@type" -match "General" }
+            $videoTitle = $generalInfo.Title
+
+            $video = $info | Where-Object { $_."@type" -match "Video" }
+            if ($video -eq $null) {
+                Write-Error "Error getting video track information from source."
+                return
+            }
+
+            $videoOptions = @()
+
+            if ([String]::IsNullOrEmpty($ForceEncoder)) {
+                if ($video.Height -ge 1080) {
+                    Write-Verbose "Detected HD video stream; using x265 encoder"
+                    $encoder = "x265"
+                } else {
+                    Write-Verbose "Detected SD video stream; using x264 encoder"
+                    $encoder = "x264"
                 }
             } else {
-                switch ($MaxVideoFormat) {
-                    '480p' { $videoOptions = '--maxWidth 480' }
-                    '720p' { $videoOptions = '--maxWidth 1280' }
-                    '1080p' { $videoOptions = '--maxWidth 1920' }
-                }
+                $encoder = $ForceEncoder
+                Write-Verbose "Using $encoder encoder"
             }
+
+            if ($VideoQuality -eq 0) {
+                switch -Regex ($encoder) {
+                    "(vt_)?[xh]264" {
+                        $quality = 18
+                        Write-Verbose "Using default quality for $encoder of $quality"
+                    }
+                    "(vt_)?[xh]265" {
+                        $quality = 21
+                        Write-Verbose "Using default quality for $encoder of $quality"
+                    }
+                }
+            } else {
+                $quality = $VideoQuality
+                Write-Verbose "Using quality $quality"
+            }
+
+            $videoOptions += "--encoder $encoder"
+            $videoOptions += "--quality $quality"
 
             if ($LookupChapterNames) {
                 $chapterCount = 0
-                $menu = $info.Mediainfo.File.track | Where-Object { $_.type -eq 'Menu' }
-                $enumerator = $menu.GetEnumerator()
-                while ($enumerator.MoveNext() -eq $true) {
-                    $chapterCount++
-                }
-                if ([String]::IsNullOrEmpty($video.Title) -eq $true) {
+                $menu = $info | Where-Object { $_."@type" -eq 'Menu' }
+                $chapterCount = ($menu.extra | Get-Member -MemberType NoteProperty).Count
+                if ([String]::IsNullOrEmpty($videoTitle) -eq $true) {
                     Write-Warning "Video track has no title!  Cannot look up chapter names."
                 } else {
-                    Write-Verbose "Contacting ChaptersDb.org (Title: $($video.Title), ChapterCount: $chapterCount)"
-                    $chapterInfo = Get-ChapterInformation -Title $video.Title -ChapterCount $chapterCount -UseChaptersDb -ChaptersDbApiKey $ChaptersDbApiKey -BestResult
+                    Write-Verbose "Contacting ChaptersDb.org (Title: $($videoTitle), ChapterCount: $chapterCount)"
+                    $chapterInfo = Get-ChapterInformation -Title $videoTitle -ChapterCount $chapterCount -BestResult
                     if ($chapterInfo -eq $null) {
                         Write-Warning "No chapter information could be retrieved from ChaptersDb.org."
                         $handbrakeOptions += "--markers"
