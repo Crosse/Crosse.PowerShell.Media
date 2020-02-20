@@ -49,118 +49,55 @@ function Get-ChapterInformation {
             [Parameter(Mandatory=$false)]
             [switch]
             # Indicates whether to return all results or just a single result deemed the "best".
-            $BestResult = $true,
-
-            [Parameter(Mandatory=$true,
-                ParameterSetName="ChaptersDb")]
-            [switch]
-            $UseChaptersDb,
-
-            [Parameter(Mandatory=$true,
-                ParameterSetName="TagChimp")]
-            [switch]
-            $UseTagChimp,
-
-            [Parameter(Mandatory=$true,
-                ParameterSetName="UseBoth")]
-            [switch]
-            $UseBothServices,
-
-            [Parameter(Mandatory=$true,
-                ParameterSetName="ChaptersDb")]
-            [Parameter(Mandatory=$true,
-                ParameterSetName="UseBoth")]
-            [string]
-            # Your API Key for the ChaptersDb.org website.
-            $ChaptersDbApiKey,
-
-            [Parameter(Mandatory=$true,
-                ParameterSetName="TagChimp")]
-            [Parameter(Mandatory=$true,
-                ParameterSetName="UseBoth")]
-            [string]
-            # Your API Key for the tagChimp.com website.
-            $TagChimpApiKey
+            $BestResult = $true
           )
 
-    $escapedTitle = [Uri]::EscapeUriString($Title).Replace("*", "")
+    $escapedTitle = [Uri]::EscapeUriString($Title).Replace("*", "").Replace("'", "")
 
     $results = @()
-    if ([String]::IsNullOrEmpty($ChaptersDbApiKey) -eq $false) {
-        $chaptersDbApi = "http://chapterdb.org/chapters/search"
-        $chaptersDbRequest = "{0}?title={1}&chapterCount={2}" -f $chaptersDbApi, $escapedTitle, $ChapterCount
 
-        $response = Invoke-WebRequest -Uri $chaptersDbRequest -Method GET -Headers @{ ApiKey = $ChaptersDbApiKey }
+    $chaptersDbApi = "https://chapterdb.plex.tv/chapters/search"
+    $chaptersDbRequest = "{0}?title={1}&chapterCount={2}" -f $chaptersDbApi, $escapedTitle, $ChapterCount
+
+    $response = Invoke-WebRequest -Uri $chaptersDbRequest -Method GET
+    if ($response.StatusCode -ne 200) {
+        Write-Error "Request unsuccessful. ($($response.StatusCode), $($response.StatusDescription))"
+        return
+    }
+
+    $info = ([xml]($response.Content)).results.chapterInfo
+
+    foreach ($result in $info) {
+        $chaptersDbRequest = "https://chapterdb.plex.tv/chapters/{0}" -f $result.ref.chapterSetId
+        $response = Invoke-WebRequest -Uri $chaptersDbRequest -Method GET
         if ($response.StatusCode -ne 200) {
             Write-Error "Request unsuccessful. ($($response.StatusCode), $($response.StatusDescription))"
             return
         }
+        $chapterInfo = ([xml]($response.Content)).chapterInfo.chapters.chapter
 
-        $info = ([xml]($response.Content)).results.chapterInfo
+        if ($chapterInfo.Count -ne $ChapterCount) {
+            continue
+        }
 
-        foreach ($result in $info) {
-            if ($result.chapters.chapter.Count -ne $ChapterCount) {
-                continue
-            }
-
-            $chapters = @()
-            for ($index = 0; $index -lt $result.chapters.chapter.Count; $index++) {
-                $chapters += New-Object PSObject -Property @{
-                    Index = $index + 1
-                    Time = [TimeSpan]$result.chapters.chapter[$index].time
-                    Title = $result.chapters.chapter[$index].name
-                }
-            }
-
-            $results += New-Object PSObject -Property @{
-                Source = "ChaptersDb"
-                ChaptersDbConfirmations = [int]$result.confirmations
-                Title = $result.title
-                Chapters = $chapters | Sort-Object Index
+        $chapters = @()
+        for ($index = 0; $index -lt $chapterInfo.Count; $index++) {
+            $chapters += New-Object PSObject -Property @{
+                Index = $index + 1
+                Time = [TimeSpan]$chapterInfo[$index].time
+                Title = $chapterInfo[$index].name
             }
         }
 
-        Write-Verbose "Found $($chapters.Count) matches from ChaptersDb."
-    }
-
-    if ($UseBothServices -or 
-            ($results.Count -eq 0 -and
-             [String]::IsNullOrEmpty($TagChimpApiKey) -eq $false)) {
-        $tagChimpApi = "https://www.tagchimp.com/ape/search.php"
-        if ($ChapterCount -eq $null) {
-            $count = "X"
-        } else {
-            $count = $ChapterCount
-        }
-        $tagChimpRequest = "{0}?token={1}&type=search&title={2}&totalChapters={3}" -f $tagChimpApi, $TagChimpApiKey, $escapedTitle, $count
-
-        $response = Invoke-WebRequest -Uri $tagChimpRequest -Method GET -Headers @{ ApiKey = $TagChimpApiKey }
-        if ($response.StatusCode -ne 200) {
-            Write-Error "Request unsuccessful. ($($response.StatusCode), $($response.StatusDescription))"
-            return
-        }
-
-        $info = ([xml]($response.Content)).items.movie
-        Write-Verbose "Found $($info.Count) matches from tagChimp."
-        $results += foreach ($result in $info) {
-            $chapters = @()
-            foreach ($chapter in $result.movieChapters.chapter) {
-                $chapters += New-Object PSObject -Property @{
-                    Index = [int]$chapter.chapterNumber
-                    Time = [TimeSpan]$chapter.chapterTime
-                    Title = $chapter.chapterTitle
-                }
-            }
-
-            New-Object PSObject -Property @{
-                Source = "tagChimp"
-                ChaptersDbConfirmations = $null
-                Title = $result.movieTags.Info.movieTitle
-                Chapters = $chapters | Sort-Object Index
-            }
+        $results += New-Object PSObject -Property @{
+            Source = "ChaptersDb"
+            ChaptersDbConfirmations = [int]$result.confirmations
+            Title = $result.title
+            Chapters = $chapters | Sort-Object Index
         }
     }
 
+    Write-Verbose "Found $($chapters.Count) matches from ChaptersDb."
 
     if ($BestResult) {
         return @($results | Sort-Object Confirmations -Descending)[0]
