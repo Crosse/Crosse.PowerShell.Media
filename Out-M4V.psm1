@@ -214,10 +214,12 @@ function Out-M4V {
                 $outFile = $OutputFile
             }
 
-            if ((Test-Path $outFile) -eq $true -and
-                    $Force -eq $false -and
-                    $WhatIf -eq $false) {
-                Write-Error "Output file already exists! ($outFile)"
+            if ((Test-Path $outFile) -eq $true -and $Force -eq $false) {
+                if ($WhatIf -eq $false) {
+                    Write-Error "Output file already exists! ($outFile)"
+                } else {
+                    Write-Information "Output file already exists ($outFile)"
+                }
                 return
             }
 
@@ -599,14 +601,13 @@ function Export-SRTSubtitle {
         for ($i = 0; $i -lt $tracks.Count; $i++) {
             $s = $tracks[$i]
 
-            if ($s.CodecID -notmatch '(S_TEXT/(UTF8|ASCII)|PGS)') {
-                Write-Information ("Skipping non-text track {0} ({1}, {2})" -f $i, $s."@type", $s.CodecID)
+            if ($s.CodecID -notmatch '(S_TEXT/(UTF8|ASCII)|PGS)|S_VOBSUB') {
+                Write-Verbose ("Skipping non-text track {0} ({1}, {2})" -f $i, $s."@type", $s.CodecID)
                 continue
             }
 
             if ($s.Forced -eq "No" -and $s.Default -eq "No" -and $All -eq $false) {
-                Write-Information ("Skipping non-default, non-forced subtitle track {0}" -f $i)
-                Write-Verbose $s
+                Write-Verbose ("Skipping non-default, non-forced subtitle track {0}" -f $i)
                 continue
             }
 
@@ -628,7 +629,7 @@ function Export-SRTSubtitle {
                 continue
             }
 
-            Write-Verbose ("Writing subtitle track with ID {0} to {1}" -f $i, $outFile)
+            Write-Information ("Writing subtitle track with ID {0} to {1}" -f $i, $outFile)
             $command = "& '$mkvextract' `"$($InputFile.FullName)`" tracks `"{0}:{1}`"" -f $i, $outFile
             if ($WhatIf -eq $false) {
                 Invoke-Expression "$command"
