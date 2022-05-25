@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (c) 2013-2020 Seth Wright <seth@crosse.org>
+# Copyright (c) 2013-2022 Seth Wright <seth@crosse.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -130,14 +130,14 @@ function Out-M4V {
     begin {
         if ($IsWindows) {
             $HandbrakeCLIPath = "HandbrakeCLI.exe"
-        } elseif ($IsMacOS) {
-            $HandbrakeCLIPath = "HandbrakeCLI"
+        } elseif ($IsMacOS -or $IsLinux) {
+            $HandbrakeCLIPath = "HandBrakeCLI"
         } else {
-            Write-Error "I don't know where to find HandbrakeCLI!"
+            Write-Error "I don't know where to find HandBrakeCLI!"
         }
 
         $HandbrakeCLIPath = (Get-Command $HandbrakeCLIPath -ErrorAction Stop).Source
-        Write-Verbose "Found HandbrakeCLI: $HandbrakeCLIPath"
+        Write-Verbose "Found HandBrakeCLI: $HandbrakeCLIPath"
 
         $OutputPath = (Resolve-Path $OutputPath -ErrorAction Stop).Path
         Write-Verbose "Output Path: $OutputPath"
@@ -493,7 +493,7 @@ function Get-MediaInfo {
     begin {
         if ($IsWindows) {
             $MediaInfoCLIPath = "MediaInfo.exe"
-        } elseif ($IsMacOS) {
+        } elseif ($IsMacOS -or $IsLinux) {
             $MediaInfoCLIPath = "mediainfo"
         } else {
             Write-Error "I don't know where to find MediaInfo!"
