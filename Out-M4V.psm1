@@ -67,7 +67,17 @@ function Out-M4V {
             $MaxVideoFormat,
 
             [Parameter(Mandatory=$false)]
-            [ValidateSet("x264", "x265", "vt_h264", "vt_h265")]
+            [ValidateSet(
+                "x264",
+                "x264_10bit",
+                "qsv_h264",
+                "vt_h264",
+                "x265",
+                "x265_10bit",
+                "x264_12bit",
+                "qsv_h265",
+                "qsv_h265_10bit",
+                "vt_h265")]
             [string]
             # Force a specific encoder.
             $ForceEncoder,
